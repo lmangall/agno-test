@@ -1,4 +1,5 @@
 import json
+import os
 from textwrap import dedent
 from pathlib import Path
 import base64
@@ -14,6 +15,8 @@ except ImportError:
 import openai
 from agno.agent import Agent
 from agno.models.openai.responses import OpenAIResponses
+from google_linkedin_search_tool import get_linkedin_usernames_list
+from linkedin_search_tool import linkedin_search
 
 # Load environment variables
 load_dotenv()
@@ -202,10 +205,86 @@ pitchdeck_agent = Agent(
 
 
 # ==========
+# LINKEDIN FOUNDER LOOKUP
+# ==========
+def lookup_founders_on_linkedin(founders_list: list, account_id: str = None) -> dict:
+    """Look up founders on LinkedIn using Google search + LinkedIn API.
+    
+    Args:
+        founders_list: List of founder names
+        account_id: Unipile account ID (optional, reads from env)
+        
+    Returns:
+        Dictionary with founder LinkedIn profiles
+    """
+    if not account_id:
+        account_id = os.getenv('UNIPILE_ACCOUNT_ID')
+    
+    if not account_id:
+        return {"error": "UNIPILE_ACCOUNT_ID not found in environment"}
+    
+    founder_profiles = {}
+    
+    for founder_name in founders_list:
+        print(f"\n🔍 Looking up {founder_name} on LinkedIn...")
+        
+        try:
+            # Step 1: Search Google for LinkedIn profiles
+            usernames = get_linkedin_usernames_list(founder_name, num_results=3)
+            
+            if not usernames:
+                print(f"   ⚠️  No LinkedIn profiles found for {founder_name}")
+                founder_profiles[founder_name] = {"error": "No LinkedIn profile found"}
+                continue
+            
+            print(f"   ✅ Found {len(usernames)} potential profile(s): {', '.join(usernames)}")
+            
+            # Step 2: Get detailed profile for the first match
+            first_username = usernames[0]
+            print(f"   📊 Fetching detailed profile for {first_username}...")
+            
+            profile_data = linkedin_search(
+                name_surname=first_username,
+                account_id=account_id
+            )
+            
+            if "error" in profile_data:
+                print(f"   ⚠️  Error fetching profile: {profile_data.get('error')}")
+                founder_profiles[founder_name] = {
+                    "username": first_username,
+                    "error": profile_data.get('error'),
+                    "alternatives": usernames[1:] if len(usernames) > 1 else []
+                }
+            else:
+                print(f"   ✅ Profile retrieved successfully")
+                founder_profiles[founder_name] = {
+                    "username": first_username,
+                    "profile": profile_data,
+                    "alternatives": usernames[1:] if len(usernames) > 1 else []
+                }
+                
+        except Exception as e:
+            print(f"   ❌ Error looking up {founder_name}: {str(e)}")
+            founder_profiles[founder_name] = {"error": str(e)}
+    
+    return founder_profiles
+
+
+# ==========
 # PITCH DECK ANALYZER
 # ==========
-def analyze_pitchdeck(file_path: str, verbose: bool = True, force_ocr: bool = False) -> str:
-    """Extract text from PDF and analyze with LLM via Agno."""
+def analyze_pitchdeck(file_path: str, verbose: bool = True, force_ocr: bool = False, lookup_founders: bool = False) -> str:
+    """Extract text from PDF and analyze with LLM via Agno.
+    
+    Args:
+        file_path: Path to PDF file
+        verbose: Print detailed extraction info
+        force_ocr: Force OCR for all pages
+        lookup_founders: If True, look up founders on LinkedIn after analysis
+        
+    Returns:
+        JSON string with analysis results and optional founder LinkedIn profiles
+    """
     print("🔍 Extracting text from PDF...\n")
     extracted_text = extract_pdf_text(file_path, verbose=verbose, force_ocr=force_ocr)
     data = json.loads(extracted_text)
@@ -221,7 +300,49 @@ def analyze_pitchdeck(file_path: str, verbose: bool = True, force_ocr: bool = Fa
     response = pitchdeck_agent.run(
         f"Analyze this startup pitch deck content and extract structured insights:\n\n{full_text}"
     )
-    return response.content
+    
+    analysis_content = response.content
+    
+    # If lookup_founders is enabled, extract founder names and look them up
+    if lookup_founders:
+        print("\n" + "="*70)
+        print("🔎 LOOKING UP FOUNDERS ON LINKEDIN")
+        print("="*70)
+        
+        try:
+            # Try to parse the analysis to extract founder names
+            # Look for founder names in the response
+            import re
+            
+            # Try to find founders in JSON format
+            founders_match = re.search(r'"founders":\s*\[(.*?)\]', analysis_content, re.DOTALL)
+            if founders_match:
+                founders_str = founders_match.group(1)
+                # Extract names from JSON array
+                founder_names = re.findall(r'"([^"]+)"', founders_str)
+                
+                if founder_names:
+                    print(f"📋 Found {len(founder_names)} founder(s): {', '.join(founder_names)}")
+                    
+                    # Look up each founder
+                    linkedin_profiles = lookup_founders_on_linkedin(founder_names)
+                    
+                    # Append LinkedIn data to the analysis
+                    result = {
+                        "analysis": analysis_content,
+                        "linkedin_profiles": linkedin_profiles
+                    }
+                    
+                    return json.dumps(result, indent=2)
+                else:
+                    print("⚠️  No founder names found in analysis")
+            else:
+                print("⚠️  Could not parse founders from analysis")
+                
+        except Exception as e:
+            print(f"❌ Error during LinkedIn lookup: {str(e)}")
+    
+    return analysis_content
 
 
 # ==========
@@ -231,10 +352,11 @@ if __name__ == "__main__":
     pdf_path = "./pitch/airbnb-pitch-deck.pdf"
 
     print("\n" + "="*70)
-    print("🚀 PITCH DECK ANALYZER")
+    print("🚀 PITCH DECK ANALYZER WITH LINKEDIN LOOKUP")
     print("="*70 + "\n")
 
-    output = analyze_pitchdeck(pdf_path, verbose=True, force_ocr=True)
+    # Set lookup_founders=True to enable LinkedIn lookup
+    output = analyze_pitchdeck(pdf_path, verbose=True, force_ocr=True, lookup_founders=True)
 
     print("\n" + "="*70)
     print("📊 ANALYSIS RESULTS")

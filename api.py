@@ -1,5 +1,6 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Query
 from pydantic import BaseModel
+from typing import Optional
 import os
 import tempfile
 from pathlib import Path
@@ -7,8 +8,8 @@ from analyze_pitchdeck import analyze_pitchdeck
 
 app = FastAPI(
     title="Pitch Deck Analyzer API",
-    description="AI-powered pitch deck analysis",
-    version="1.0.0"
+    description="AI-powered pitch deck analysis with LinkedIn founder lookup",
+    version="2.0.0"
 )
 
 # Response model
@@ -18,9 +19,10 @@ class AnalysisResponse(BaseModel):
 @app.get("/")
 async def root():
     return {
-        "message": "Pitch Deck Analyzer API",
+        "message": "Pitch Deck Analyzer API with LinkedIn Lookup",
+        "version": "2.0.0",
         "endpoints": {
-            "/analyze": "POST - Analyze a pitch deck PDF",
+            "/analyze": "POST - Analyze a pitch deck PDF (add ?lookup_founders=true for LinkedIn lookup)",
             "/health": "GET - Health check"
         }
     }
@@ -31,13 +33,20 @@ async def health():
 
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze_deck(
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    lookup_founders: bool = Query(False, description="Look up founders on LinkedIn after analysis")
 ):
     """
     Upload a PDF pitch deck and get AI-powered analysis.
     Uses OpenAI Vision OCR for all pages.
     
     - **file**: PDF file to analyze
+    - **lookup_founders**: If true, automatically looks up founders on LinkedIn (requires UNIPILE_ACCOUNT_ID in env)
+    
+    Example with LinkedIn lookup:
+    ```
+    curl -X POST "http://localhost:8000/analyze?lookup_founders=true" -F "file=@pitch.pdf"
+    ```
     """
     # Validate file type
     if not file.filename.endswith('.pdf'):
@@ -50,9 +59,18 @@ async def analyze_deck(
             tmp_file.write(content)
             tmp_path = tmp_file.name
         
-        print(f"🚀 Analyzing pitch deck with OpenAI Vision OCR")
-        # Analyze the pitch deck with forced OCR
-        analysis = analyze_pitchdeck(tmp_path, verbose=False, force_ocr=True)
+        if lookup_founders:
+            print(f"🚀 Analyzing pitch deck with OpenAI Vision OCR + LinkedIn founder lookup")
+        else:
+            print(f"🚀 Analyzing pitch deck with OpenAI Vision OCR")
+            
+        # Analyze the pitch deck with optional LinkedIn lookup
+        analysis = analyze_pitchdeck(
+            tmp_path, 
+            verbose=False, 
+            force_ocr=True,
+            lookup_founders=lookup_founders
+        )
         
         # Clean up the temporary file
         Path(tmp_path).unlink()
