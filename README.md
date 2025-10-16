@@ -111,3 +111,10 @@ Deployed on Render:
 
 <img width="1309" height="697" alt="Screenshot 2025-10-16 at 16 33 56" src="https://github.com/user-attachments/assets/7e6b4ffe-8512-4263-b6ee-a22f70d11669" />
 
+
+What was new for me on this project:
+Agno
+Unipile API
+Google Custom Search JSON API
+OCR and pdf reading in python (but this was rather unsuccesful)
+using OpenAI API as OCR
