@@ -31,17 +31,14 @@ async def health():
 
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze_deck(
-    file: UploadFile = File(...),
-    force_ocr: bool = False
+    file: UploadFile = File(...)
 ):
     """
     Upload a PDF pitch deck and get AI-powered analysis.
+    Uses OpenAI Vision OCR for all pages.
     
     - **file**: PDF file to analyze
-    - **force_ocr**: Force OCR extraction (default: False)
     """
-    print(f"🔧 API received force_ocr={force_ocr} (type: {type(force_ocr)})")
-    
     # Validate file type
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
@@ -53,9 +50,9 @@ async def analyze_deck(
             tmp_file.write(content)
             tmp_path = tmp_file.name
         
-        print(f"🚀 Calling analyze_pitchdeck with force_ocr={force_ocr}")
-        # Analyze the pitch deck
-        analysis = analyze_pitchdeck(tmp_path, verbose=False, force_ocr=force_ocr)
+        print(f"🚀 Analyzing pitch deck with OpenAI Vision OCR")
+        # Analyze the pitch deck with forced OCR
+        analysis = analyze_pitchdeck(tmp_path, verbose=False, force_ocr=True)
         
         # Clean up the temporary file
         Path(tmp_path).unlink()
