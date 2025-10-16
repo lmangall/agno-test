@@ -1,50 +1,26 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
-from textwrap import dedent
-from agno.agent import Agent
-from agno.models.openai import OpenAIChat
 import os
+import tempfile
+from pathlib import Path
+from analyze_pitchdeck import analyze_pitchdeck
 
 app = FastAPI(
-    title="News Reporter Agent API",
-    description="An enthusiastic NYC news reporter powered by AI",
+    title="Pitch Deck Analyzer API",
+    description="AI-powered pitch deck analysis",
     version="1.0.0"
 )
 
-# Request/Response models
-class NewsRequest(BaseModel):
-    prompt: str
-    stream: bool = False
-
-class NewsResponse(BaseModel):
-    response: str
-
-# Initialize the agent
-def get_agent():
-    return Agent(
-        model=OpenAIChat(id="gpt-4o-mini"),
-        instructions=dedent("""\
-            You are an enthusiastic news reporter with a flair for storytelling! 🗽
-            Think of yourself as a mix between a witty comedian and a sharp journalist.
-
-            Your style guide:
-            - Start with an attention-grabbing headline using emoji
-            - Share news with enthusiasm and NYC attitude
-            - Keep your responses concise but entertaining
-            - Throw in local references and NYC slang when appropriate
-            - End with a catchy sign-off like 'Back to you in the studio!' or 'Reporting live from the Big Apple!'
-
-            Remember to verify all facts while keeping that NYC energy high!\
-        """),
-        markdown=True,
-    )
+# Response model
+class AnalysisResponse(BaseModel):
+    analysis: str
 
 @app.get("/")
 async def root():
     return {
-        "message": "News Reporter Agent API",
+        "message": "Pitch Deck Analyzer API",
         "endpoints": {
-            "/report": "POST - Get a news report",
+            "/analyze": "POST - Analyze a pitch deck PDF",
             "/health": "GET - Health check"
         }
     }
@@ -53,20 +29,43 @@ async def root():
 async def health():
     return {"status": "healthy"}
 
-@app.post("/report", response_model=NewsResponse)
-async def get_report(request: NewsRequest):
+@app.post("/analyze", response_model=AnalysisResponse)
+async def analyze_deck(
+    file: UploadFile = File(...),
+    force_ocr: bool = False
+):
+    """
+    Upload a PDF pitch deck and get AI-powered analysis.
+    
+    - **file**: PDF file to analyze
+    - **force_ocr**: Force OCR extraction (default: False)
+    """
+    # Validate file type
+    if not file.filename.endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported")
+    
     try:
-        agent = get_agent()
-        response = agent.run(request.prompt, stream=request.stream)
+        # Create a temporary file to store the upload
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+            content = await file.read()
+            tmp_file.write(content)
+            tmp_path = tmp_file.name
         
-        # Extract the content from the response
-        if hasattr(response, 'content'):
-            content = response.content
-        else:
-            content = str(response)
-            
-        return NewsResponse(response=content)
+        # Analyze the pitch deck
+        analysis = analyze_pitchdeck(tmp_path, verbose=False, force_ocr=force_ocr)
+        
+        # Clean up the temporary file
+        Path(tmp_path).unlink()
+        
+        return AnalysisResponse(analysis=analysis)
+    
     except Exception as e:
+        # Clean up on error
+        if 'tmp_path' in locals():
+            try:
+                Path(tmp_path).unlink()
+            except:
+                pass
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
