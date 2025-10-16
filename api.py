@@ -40,6 +40,8 @@ async def analyze_deck(
     - **file**: PDF file to analyze
     - **force_ocr**: Force OCR extraction (default: False)
     """
+    print(f"🔧 API received force_ocr={force_ocr} (type: {type(force_ocr)})")
+    
     # Validate file type
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
@@ -51,6 +53,7 @@ async def analyze_deck(
             tmp_file.write(content)
             tmp_path = tmp_file.name
         
+        print(f"🚀 Calling analyze_pitchdeck with force_ocr={force_ocr}")
         # Analyze the pitch deck
         analysis = analyze_pitchdeck(tmp_path, verbose=False, force_ocr=force_ocr)
         
