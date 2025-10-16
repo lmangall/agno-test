@@ -7,3 +7,4 @@ python-multipart
 PyMuPDF
 Pillow
 python-dotenv
+requests
