@@ -2,7 +2,12 @@
 """Test script for Google LinkedIn Search Tool."""
 
 import sys
-from google_linkedin_search_tool import _google_linkedin_search_impl, google_linkedin_search_raw
+from google_linkedin_search_tool import (
+    _google_linkedin_search_impl,
+    _get_linkedin_usernames_impl,
+    google_linkedin_search_raw,
+    get_linkedin_usernames_list
+)
 
 
 def test_search(query: str, num_results: int = 5):
@@ -19,8 +24,20 @@ def test_search(query: str, num_results: int = 5):
     result = _google_linkedin_search_impl(query, num_results)
     print(result)
     
+    # Test username extraction
+    print("\n--- LinkedIn Usernames (String) ---\n")
+    usernames_str = _get_linkedin_usernames_impl(query, num_results)
+    print(usernames_str)
+    
+    # Test username list
+    print("\n--- LinkedIn Usernames (List) ---\n")
+    usernames_list = get_linkedin_usernames_list(query, num_results)
+    print(f"Found {len(usernames_list)} username(s):")
+    for idx, username in enumerate(usernames_list, 1):
+        print(f"  {idx}. {username}")
+    
     # Test the raw API response
-    print("\n--- Raw API Response ---\n")
+    print("\n--- Raw API Response Summary ---\n")
     raw_result = google_linkedin_search_raw(query, num_results)
     
     if "error" in raw_result:

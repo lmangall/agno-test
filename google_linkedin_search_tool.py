@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
@@ -71,6 +72,21 @@ class GoogleLinkedInSearchClient:
             }
 
 
+def extract_linkedin_username(url: str) -> Optional[str]:
+    """Extract LinkedIn username from a LinkedIn profile URL.
+    
+    Args:
+        url: LinkedIn profile URL (e.g., https://fr.linkedin.com/in/l-mangallon)
+        
+    Returns:
+        Username string (e.g., 'l-mangallon') or None if not found
+    """
+    # Pattern to match LinkedIn profile URLs
+    pattern = r'linkedin\.com/in/([^/?]+)'
+    match = re.search(pattern, url)
+    return match.group(1) if match else None
+
+
 def _google_linkedin_search_impl(query: str, num_results: int = 10) -> str:
     """Implementation of Google LinkedIn search - can be called directly."""
     try:
@@ -94,14 +110,50 @@ def _google_linkedin_search_impl(query: str, num_results: int = 10) -> str:
             link = item.get('link', 'N/A')
             snippet = item.get('snippet', 'N/A')
             
+            # Extract username from URL
+            username = extract_linkedin_username(link)
+            
             formatted_result += f"{idx}. **{title}**\n"
             formatted_result += f"   URL: {link}\n"
+            if username:
+                formatted_result += f"   Username: {username}\n"
             formatted_result += f"   {snippet}\n\n"
         
         return formatted_result
         
     except Exception as e:
         return f"❌ Error searching LinkedIn via Google: {str(e)}"
+
+
+def _get_linkedin_usernames_impl(query: str, num_results: int = 10) -> str:
+    """Get LinkedIn usernames from search results."""
+    try:
+        client = GoogleLinkedInSearchClient()
+        results = client.search(query=query, num_results=num_results)
+        
+        if "error" in results:
+            return f"❌ Error: {results['error']}"
+        
+        items = results.get('items', [])
+        if not items:
+            return f"🔍 No LinkedIn profiles found for '{query}'"
+        
+        # Extract usernames
+        usernames = []
+        for item in items:
+            link = item.get('link', '')
+            username = extract_linkedin_username(link)
+            if username:
+                usernames.append(username)
+        
+        if not usernames:
+            return f"🔍 No LinkedIn usernames found for '{query}'"
+        
+        # Return as comma-separated list
+        return ", ".join(usernames)
+        
+    except Exception as e:
+        return f"❌ Error extracting LinkedIn usernames: {str(e)}"
 
 
 @tool
@@ -121,7 +173,24 @@ def google_linkedin_search(query: str, num_results: int = 10) -> str:
     return _google_linkedin_search_impl(query, num_results)
 
 
-# Direct usage function (not as agno tool)
+@tool
+def get_linkedin_usernames(query: str, num_results: int = 10) -> str:
+    """Get LinkedIn usernames from Google search results.
+    
+    This tool searches for LinkedIn profiles and extracts just the usernames
+    (e.g., 'l-mangallon') which can be used with other LinkedIn tools.
+    
+    Args:
+        query: Search query - typically a person's name (e.g., "leonard mangallon")
+        num_results: Number of results to return (1-10, default 10)
+        
+    Returns:
+        Comma-separated list of LinkedIn usernames
+    """
+    return _get_linkedin_usernames_impl(query, num_results)
+
+
+# Direct usage functions (not as agno tools)
 def google_linkedin_search_raw(query: str, num_results: int = 10) -> Dict[str, Any]:
     """Direct Google LinkedIn search function that returns raw API response.
     
@@ -134,6 +203,34 @@ def google_linkedin_search_raw(query: str, num_results: int = 10) -> Dict[str, A
     """
     client = GoogleLinkedInSearchClient()
     return client.search(query=query, num_results=num_results)
+
+
+def get_linkedin_usernames_list(query: str, num_results: int = 10) -> List[str]:
+    """Get LinkedIn usernames as a Python list.
+    
+    Args:
+        query: Search query
+        num_results: Number of results (1-10)
+        
+    Returns:
+        List of LinkedIn usernames
+    """
+    client = GoogleLinkedInSearchClient()
+    results = client.search(query=query, num_results=num_results)
+    
+    if "error" in results:
+        return []
+    
+    items = results.get('items', [])
+    usernames = []
+    
+    for item in items:
+        link = item.get('link', '')
+        username = extract_linkedin_username(link)
+        if username:
+            usernames.append(username)
+    
+    return usernames
 
 
 if __name__ == "__main__":
