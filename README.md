@@ -9,7 +9,12 @@
 
 **Solution 1:**
 -   Use an OCR Library
-Problem: this is a fast test I want it deployed on Render without dockerisation, and PyTesselate requires OS-level install  
+Problem: this is a fast test I want it deployed on Render without dockerisation, and PyTesselate requires OS-level install 
+
+**Problem with fallback approach:**
+You could use a regular Python lib for reading pdf and only IF text is not clear then use encoding
+This has to be done carefully cause with our test files some files had both clear text and encoded text, resulting in fallback not happening
+
 
 **Solution Final:**
 
@@ -26,21 +31,21 @@ python api.py
 
 ### Analyze a pitch deck
 ```bash
-curl -X POST "http://localhost:8000/analyze" \
+curl -X POST "https://news-reporter-api.onrender.com/analyze" \
   -F "file=@pitch/airbnb-pitch-deck.pdf" \
   -F "force_ocr=false"
 ```
 
 ### With forced OCR
 ```bash
-curl -X POST "http://localhost:8000/analyze" \
+curl -X POST "https://news-reporter-api.onrender.com/analyze" \
   -F "file=@pitch/airbnb-pitch-deck.pdf" \
   -F "force_ocr=true"
 ```
 
 ### Health check
 ```bash
-curl http://localhost:8000/health
+curl https://news-reporter-api.onrender.com/health
 ```
         
     
