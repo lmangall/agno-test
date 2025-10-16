@@ -85,8 +85,26 @@ def extract_pdf_text(file_path: str, verbose: bool = True, force_ocr: bool = Fal
 
                 methods_tried = []
 
-                # If force_ocr is True, skip other methods and go straight to Vision OCR
-                if not force_ocr:
+                # If force_ocr is True, go DIRECTLY to Vision OCR
+                if force_ocr and PIL_AVAILABLE:
+                    try:
+                        print(f"📸 Converting page {page_num + 1} to image for Vision OCR (forced)...")
+                        pix = page.get_pixmap(dpi=300)
+                        img_data = pix.tobytes("png")
+                        img_base64 = base64.b64encode(img_data).decode("utf-8")
+                        print(f"📤 Image size: {len(img_base64)} bytes (base64)")
+                        ocr_text = ocr_with_vision_sdk(img_base64)
+                        if ocr_text and len(ocr_text.strip()) > 50:
+                            text = ocr_text
+                            methods_tried.append("vision_ocr_forced")
+                            print(f"✅ Vision OCR extracted {len(ocr_text)} characters")
+                        else:
+                            print(f"⚠️ Vision OCR returned insufficient text: {len(ocr_text.strip()) if ocr_text else 0} chars")
+                    except Exception as e:
+                        print(f"❌ Vision OCR failed: {str(e)[:100]}...")
+                
+                # Only try other methods if force_ocr is False
+                elif not force_ocr:
                     # Method 1: dict reconstruction
                     try:
                         blocks = page.get_text("dict")["blocks"]
@@ -117,25 +135,25 @@ def extract_pdf_text(file_path: str, verbose: bool = True, force_ocr: bool = Fal
                     except:
                         pass
 
-                # Method 3: Vision OCR
-                has_artifacts = '&#x' in text or len([c for c in text if ord(c) > 127]) > len(text) * 0.1
-                print(f"🔍 Vision OCR check - PIL_AVAILABLE: {PIL_AVAILABLE}, force_ocr: {force_ocr}, has_artifacts: {has_artifacts}, methods_tried: {methods_tried}")
-                if PIL_AVAILABLE and (force_ocr or has_artifacts or not methods_tried):
-                    try:
-                        print(f"📸 Converting page {page_num + 1} to image for Vision OCR...")
-                        pix = page.get_pixmap(dpi=300)
-                        img_data = pix.tobytes("png")
-                        img_base64 = base64.b64encode(img_data).decode("utf-8")
-                        print(f"📤 Image size: {len(img_base64)} bytes (base64)")
-                        ocr_text = ocr_with_vision_sdk(img_base64)
-                        if ocr_text and len(ocr_text.strip()) > 50:
-                            text = ocr_text
-                            methods_tried.append("vision_ocr")
-                            print(f"✅ Vision OCR extracted {len(ocr_text)} characters")
-                        else:
-                            print(f"⚠️ Vision OCR returned insufficient text: {len(ocr_text.strip()) if ocr_text else 0} chars")
-                    except Exception as e:
-                        print(f"❌ Vision OCR failed: {str(e)[:100]}...")
+                    # Method 3: Vision OCR (fallback for non-forced mode)
+                    has_artifacts = '&#x' in text or len([c for c in text if ord(c) > 127]) > len(text) * 0.1
+                    print(f"🔍 Vision OCR check - PIL_AVAILABLE: {PIL_AVAILABLE}, has_artifacts: {has_artifacts}, methods_tried: {methods_tried}")
+                    if PIL_AVAILABLE and (has_artifacts or not methods_tried):
+                        try:
+                            print(f"📸 Converting page {page_num + 1} to image for Vision OCR...")
+                            pix = page.get_pixmap(dpi=300)
+                            img_data = pix.tobytes("png")
+                            img_base64 = base64.b64encode(img_data).decode("utf-8")
+                            print(f"📤 Image size: {len(img_base64)} bytes (base64)")
+                            ocr_text = ocr_with_vision_sdk(img_base64)
+                            if ocr_text and len(ocr_text.strip()) > 50:
+                                text = ocr_text
+                                methods_tried.append("vision_ocr")
+                                print(f"✅ Vision OCR extracted {len(ocr_text)} characters")
+                            else:
+                                print(f"⚠️ Vision OCR returned insufficient text: {len(ocr_text.strip()) if ocr_text else 0} chars")
+                        except Exception as e:
+                            print(f"❌ Vision OCR failed: {str(e)[:100]}...")
 
                 if methods_tried:
                     print(f"✅ Enhanced extraction successful using: {', '.join(methods_tried)}")
