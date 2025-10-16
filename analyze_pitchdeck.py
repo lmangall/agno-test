@@ -63,10 +63,15 @@ def extract_pdf_text(file_path: str, verbose: bool = True, force_ocr: bool = Fal
 
         for page_num in range(len(doc)):
             page = doc[page_num]
-            text = page.get_text()
-
-            needs_better_extraction = not text.strip() or "(cid:" in text \
-                                      or len([c for c in text if ord(c) > 127]) > len(text) * 0.3
+            
+            # If force_ocr is True, skip normal text extraction and go straight to OCR
+            if force_ocr:
+                text = ""
+                needs_better_extraction = True
+            else:
+                text = page.get_text()
+                needs_better_extraction = not text.strip() or "(cid:" in text \
+                                          or len([c for c in text if ord(c) > 127]) > len(text) * 0.3
 
             if needs_better_extraction or force_ocr:
                 if force_ocr:
