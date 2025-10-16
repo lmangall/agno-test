@@ -1,3 +1,8 @@
 .venv
 .env
 pitch/*
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python

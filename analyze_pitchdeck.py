@@ -1,187 +1,211 @@
 import json
 from textwrap import dedent
 from pathlib import Path
-
-from agno.agent import Agent
-from agno.models.openai import OpenAIChat
+import base64
 import fitz  # PyMuPDF
 from dotenv import load_dotenv
+try:
+    from PIL import Image
+    import io
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+
+import openai
+from agno.agent import Agent
+from agno.models.openai.responses import OpenAIResponses
 
 # Load environment variables
 load_dotenv()
 
 
 # ==========
-# 1️⃣ PDF TEXT EXTRACTOR (PYMUPDF)
+# OCR HELPER FUNCTION (OpenAI Vision API)
 # ==========
+def ocr_with_vision_sdk(image_base64: str) -> str:
+    """Extract text from an image using OpenAI Vision API (GPT-4o-mini)."""
+    image_data = f"data:image/png;base64,{image_base64}"
+    response = openai.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "Extract all text from this image. Return only text, "
+                            "preserve layout and structure as much as possible."
+                        )
+                    },
+                    {"type": "image_url", "image_url": {"url": image_data}}
+                ]
+            }
+        ],
+        max_tokens=2000
+    )
+    return response.choices[0].message.content
 
-def extract_pdf_text(file_path: str, verbose: bool = True) -> str:
-    """Extract text from a PDF file page by page and return as JSON.
 
-    Args:
-        file_path (str): Path to the PDF file.
-        verbose (bool): If True, prints extracted text for each page.
-
-    Returns:
-        str: JSON string with text extracted from each page.
-    """
+# ==========
+# PDF TEXT EXTRACTOR
+# ==========
+def extract_pdf_text(file_path: str, verbose: bool = True, force_ocr: bool = False) -> str:
+    """Extract text from PDF page by page with optional OCR fallback."""
     pdf_path = Path(file_path)
     if not pdf_path.exists():
         return json.dumps({"error": f"File not found: {file_path}"})
 
     pages = []
-    
     try:
-        # Open PDF with PyMuPDF
         doc = fitz.open(str(pdf_path))
-        
         print(f"📄 Found {len(doc)} pages in PDF\n")
-        
+
         for page_num in range(len(doc)):
             page = doc[page_num]
             text = page.get_text()
-            
-            # If text extraction fails, try OCR on the page image
-            if not text.strip() or "(cid:" in text:
-                print(f"⚠️  Page {page_num + 1} needs OCR, extracting from image...")
-                # Get page as image and extract text
-                pix = page.get_pixmap(dpi=300)
-                img_bytes = pix.tobytes("png")
-                
-                # Use pytesseract if available
+
+            needs_better_extraction = not text.strip() or "(cid:" in text \
+                                      or len([c for c in text if ord(c) > 127]) > len(text) * 0.3
+
+            if needs_better_extraction or force_ocr:
+                if force_ocr:
+                    print(f"🔍 Using enhanced extraction for page {page_num + 1} (forced mode)")
+                else:
+                    print(f"⚠️ Page {page_num + 1} has encoding issues, trying enhanced extraction...")
+
+                methods_tried = []
+
+                # Method 1: dict reconstruction
                 try:
-                    from PIL import Image
-                    import pytesseract
-                    import io
-                    
-                    img = Image.open(io.BytesIO(img_bytes))
-                    text = pytesseract.image_to_string(img)
-                except ImportError:
-                    print("⚠️  pytesseract not available, using raw extraction")
-                    text = page.get_text()
-            
+                    blocks = page.get_text("dict")["blocks"]
+                    parts = []
+                    for block in blocks:
+                        if "lines" in block:
+                            for line in block["lines"]:
+                                for span in line["spans"]:
+                                    t = span.get("text", "")
+                                    if t.strip():
+                                        parts.append(t)
+                    reconstructed = " ".join(parts)
+                    if reconstructed and len(reconstructed) > len(text):
+                        text = reconstructed
+                        methods_tried.append("dict_reconstruction")
+                except:
+                    pass
+
+                # Method 2: HTML extraction
+                try:
+                    html_text = page.get_text("html")
+                    import re
+                    clean_text = re.sub(r"<[^>]+>", " ", html_text)
+                    clean_text = re.sub(r"\s+", " ", clean_text).strip()
+                    if clean_text and len(clean_text) > len(text):
+                        text = clean_text
+                        methods_tried.append("html_extraction")
+                except:
+                    pass
+
+                # Method 3: Vision OCR
+                has_artifacts = '&#x' in text or len([c for c in text if ord(c) > 127]) > len(text) * 0.1
+                if PIL_AVAILABLE and (force_ocr or has_artifacts or not methods_tried):
+                    try:
+                        pix = page.get_pixmap(dpi=300)
+                        img_data = pix.tobytes("png")
+                        img_base64 = base64.b64encode(img_data).decode("utf-8")
+                        ocr_text = ocr_with_vision_sdk(img_base64)
+                        if ocr_text and len(ocr_text.strip()) > 50:
+                            text = ocr_text
+                            methods_tried.append("vision_ocr")
+                    except Exception as e:
+                        print(f"Vision OCR failed: {str(e)[:100]}...")
+
+                if methods_tried:
+                    print(f"✅ Enhanced extraction successful using: {', '.join(methods_tried)}")
+
             pages.append({"page": page_num + 1, "content": text.strip()})
-            
-            # Print progress
+
             if verbose:
                 print(f"{'='*70}")
                 print(f"📖 PAGE {page_num + 1}/{len(doc)}")
                 print(f"{'='*70}")
-                # Print first 500 characters of the page
                 preview = text.strip()[:500]
                 print(preview)
                 if len(text.strip()) > 500:
                     print(f"\n... ({len(text.strip())} total characters)")
                 print(f"{'='*70}\n")
-        
+
         doc.close()
-        
     except Exception as e:
         return json.dumps({"error": f"Failed to extract PDF: {str(e)}"})
-    
+
     return json.dumps(pages)
 
 
 # ==========
-# 2️⃣ PITCH DECK ANALYZER TOOL
+# AGENT DEFINITION (OpenAIResponses)
 # ==========
+pitchdeck_agent = Agent(
+    model=OpenAIResponses(id="gpt-4o-mini"),
+    instructions=dedent("""\
+        You are a startup analyst and venture scout who reviews pitch decks 🦄.
+        Extract structured startup insights from PDF text.
 
-def analyze_pitchdeck(file_path: str, verbose: bool = True) -> str:
-    """Full pipeline: extract text from a PDF and analyze it using an LLM.
+        **Goals:**
+        - startup_name, value_proposition
+        - number_of_founders, founders
+        - problem, solution, target_market
+        - traction, funding, notable_points
+        - summary
 
-    Args:
-        file_path (str): Path to the pitch deck PDF.
-        verbose (bool): If True, prints extraction progress.
+        Return a clean JSON block only.
+        Set missing fields to null.
+        End with a one-line investor remark.
+    """),
+    markdown=True
+)
 
-    Returns:
-        str: Structured JSON-style summary with startup insights.
-    """
-    # Extract text first
+
+# ==========
+# PITCH DECK ANALYZER
+# ==========
+def analyze_pitchdeck(file_path: str, verbose: bool = True, force_ocr: bool = False) -> str:
+    """Extract text from PDF and analyze with LLM via Agno."""
     print("🔍 Extracting text from PDF...\n")
-    extracted_text = extract_pdf_text(file_path, verbose=verbose)
+    extracted_text = extract_pdf_text(file_path, verbose=verbose, force_ocr=force_ocr)
     data = json.loads(extracted_text)
 
     if "error" in data:
         return extracted_text
 
-    # Combine all text into one document for LLM analysis
     full_text = "\n\n".join([f"Page {p['page']}:\n{p['content']}" for p in data])
 
-    print(f"\n✅ Successfully extracted {len(data)} pages of text")
-    print(f"📊 Total characters: {len(full_text)}\n")
+    print(f"\n✅ Extracted {len(data)} pages, {len(full_text)} characters")
     print("🤖 Sending to LLM for analysis...\n")
 
-    # Call the analyzer agent
     response = pitchdeck_agent.run(
         f"Analyze this startup pitch deck content and extract structured insights:\n\n{full_text}"
     )
-
     return response.content
 
 
 # ==========
-# 3️⃣ AGENT DEFINITION
+# EXAMPLE USAGE
 # ==========
-
-pitchdeck_agent = Agent(
-    model=OpenAIChat(id="gpt-5-mini"),
-    instructions=dedent("""\
-        You are a startup analyst and venture scout who reviews pitch decks 🦄.
-        Your job is to extract and structure startup insights from PDF content.
-
-        **Analysis goals:**
-        - Identify: Startup name, tagline, and value proposition
-        - Founders: Number of founders, names, short bios if mentioned
-        - Product: Problem being solved, solution, target market
-        - Metrics: Traction, funding, or growth indicators
-        - Additional: Notable partnerships, technology, or GTM strategy
-
-        **Formatting:**
-        Return the output as a clean JSON-like Markdown block:
-```json
-        {
-          "startup_name": "...",
-          "value_proposition": "...",
-          "number_of_founders": ...,
-          "founders": ["...", "..."],
-          "problem": "...",
-          "solution": "...",
-          "target_market": "...",
-          "traction": "...",
-          "funding": "...",
-          "notable_points": "...",
-          "summary": "..."
-        }
-```
-
-        - Be concise and factual.
-        - If a field is missing, set it to null.
-        - End with a one-line investor remark, e.g.:
-          "🚀 Strong early-stage potential in a growing market."
-    """),
-    markdown=True,
-)
-
-
-# ==========
-# 4️⃣ EXAMPLE USAGE
-# ==========
-
 if __name__ == "__main__":
-    # Example pitch deck to analyze
     pdf_path = "./pitch/airbnb-pitch-deck.pdf"
 
     print("\n" + "="*70)
     print("🚀 PITCH DECK ANALYZER")
     print("="*70 + "\n")
 
-    output = analyze_pitchdeck(pdf_path, verbose=True)
-    
+    output = analyze_pitchdeck(pdf_path, verbose=True, force_ocr=True)
+
     print("\n" + "="*70)
     print("📊 ANALYSIS RESULTS")
     print("="*70 + "\n")
     print(output)
-    
+
     print("\n" + "="*70)
     print("✅ DONE!")
     print("="*70 + "\n")
