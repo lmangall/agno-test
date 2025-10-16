@@ -76,35 +76,37 @@ def extract_pdf_text(file_path: str, verbose: bool = True, force_ocr: bool = Fal
 
                 methods_tried = []
 
-                # Method 1: dict reconstruction
-                try:
-                    blocks = page.get_text("dict")["blocks"]
-                    parts = []
-                    for block in blocks:
-                        if "lines" in block:
-                            for line in block["lines"]:
-                                for span in line["spans"]:
-                                    t = span.get("text", "")
-                                    if t.strip():
-                                        parts.append(t)
-                    reconstructed = " ".join(parts)
-                    if reconstructed and len(reconstructed) > len(text):
-                        text = reconstructed
-                        methods_tried.append("dict_reconstruction")
-                except:
-                    pass
+                # If force_ocr is True, skip other methods and go straight to Vision OCR
+                if not force_ocr:
+                    # Method 1: dict reconstruction
+                    try:
+                        blocks = page.get_text("dict")["blocks"]
+                        parts = []
+                        for block in blocks:
+                            if "lines" in block:
+                                for line in block["lines"]:
+                                    for span in line["spans"]:
+                                        t = span.get("text", "")
+                                        if t.strip():
+                                            parts.append(t)
+                        reconstructed = " ".join(parts)
+                        if reconstructed and len(reconstructed) > len(text):
+                            text = reconstructed
+                            methods_tried.append("dict_reconstruction")
+                    except:
+                        pass
 
-                # Method 2: HTML extraction
-                try:
-                    html_text = page.get_text("html")
-                    import re
-                    clean_text = re.sub(r"<[^>]+>", " ", html_text)
-                    clean_text = re.sub(r"\s+", " ", clean_text).strip()
-                    if clean_text and len(clean_text) > len(text):
-                        text = clean_text
-                        methods_tried.append("html_extraction")
-                except:
-                    pass
+                    # Method 2: HTML extraction
+                    try:
+                        html_text = page.get_text("html")
+                        import re
+                        clean_text = re.sub(r"<[^>]+>", " ", html_text)
+                        clean_text = re.sub(r"\s+", " ", clean_text).strip()
+                        if clean_text and len(clean_text) > len(text):
+                            text = clean_text
+                            methods_tried.append("html_extraction")
+                    except:
+                        pass
 
                 # Method 3: Vision OCR
                 has_artifacts = '&#x' in text or len([c for c in text if ord(c) > 127]) > len(text) * 0.1
